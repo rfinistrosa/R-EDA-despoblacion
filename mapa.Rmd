@@ -1,0 +1,198 @@
+---
+title: "R Notebook - TFM - Densidad de población en España"
+output:
+  pdf_document: default
+  html_notebook: default
+  html_document:
+    df_print: paged
+  word_document: default
+---
+
+# El objetivo de éste Notebook en R es presentar el mapa de la densidad de población en España, para el análisis de la despoblación
+
+- Se utilizan las librerías rgdal y tmap
+- Se obienen los datos gráficos de Municipios_IGN, y de Provincias_ETRS89_30N
+- Se obtienen los datos de población del DATASET municipios.csv preparado en fases previas
+
+
+```{r}
+rm(list=ls())
+#setwd("usr/rfinistrosa/proyectos/despoblacion/")  Modificad con el Working Directory elegido
+is.installed <- function(paquete) is.element(paquete, installed.packages())
+if(!is.installed('rgdal'))
+install.packages('rgdal')
+library(rgdal)
+if(!is.installed('tmap'))
+install.packages('tmap')
+library(tmap)
+
+# Leemos los municipios de la fuente de datos de IGN (previamente descargados) y creamos un vector spacial
+i_data_gs_municipios <- readOGR(dsn = "data/IGN", layer = "Municipios_IGN")
+# Leemos los municipios de las islar canarias de la fuente de datos de IGN (previamente descargados) y creamos un vector spacial
+i_data_gs_municipios_islas <- readOGR(dsn = "data/IGN/municanarias", layer = "Municipios_IGN")
+
+# Leemos las provincias de la fuente de datos de IGN (previamente descargados) y creamos un vector spacial
+i_data_gs_provincias <- readOGR(dsn = "data/IGN", layer = "Provincias_ETRS89_30N", encoding = "UTF-8")
+# Separamos en dos vectores las provincia de las Islas Canarias y el resto
+i_data_gs_provincias_islas <- subset(i_data_gs_provincias, grepl("Santa Cruz de Tenerife|Las Palmas", Texto))
+i_data_gs_provincias_peninsula <- subset(i_data_gs_provincias, !grepl("Santa Cruz de Tenerife|Las Palmas", Texto))
+```
+## Leemos el fichero de datos, y creamos el dataset
+```{r}
+data <- read.csv2("data/municipios.csv", fileEncoding="UTF-8", header=T, stringsAsFactors=TRUE, quote='',dec='.', colClasses=c("character","character","character","character","character","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric") )  
+```
+
+## Comprobamos la estructura del dataset
+```{r}
+str(data)
+head(data)
+dim(data)
+```
+## DENSIDAD DE POBLACIÓN (Número de habitantes / Superficie en Km2) EN ESPAÑA
+```{r}
+myvars <- c("COD_PROV", "PROVINCIA", "SUPERFICIE", "HABITANTES")
+dftotal<-data[myvars]
+sum(dftotal$SUPERFICIE/100)
+sum(dftotal$HABITANTES)
+sum(dftotal$HABITANTES)/sum((dftotal$SUPERFICIE)/100)
+```
+
+```{r}
+
+```
+## DENSIDAD DE POBLACIÓN POR PROVINCIAS
+Agregamos la población y superficie por provincias, para averiguar las provincias con menor densidad
+```{r}
+myvars <- c("COD_PROV", "PROVINCIA", "SUPERFICIE", "HABITANTES")
+dfprovincias<-data[myvars]
+dfprovincias <-aggregate(list(data$HABITANTES, data$SUPERFICIE/100, data$HABITANTES / (data$SUPERFICIE / 100)), by=list(Provincia = data$PROVINCIA, Codigo = data$COD_PROV), FUN= sum)
+names(dfprovincias)[3] <- "HABITANTES"
+names(dfprovincias)[4] <- "SUPERFICIE"
+names(dfprovincias)[5] <- "DENSIDAD"
+
+dfprovincias <- transform(dfprovincias, DENSIDAD = HABITANTES / SUPERFICIE)
+
+View(dfprovincias)
+```
+## Como podemos observar en los datos, tanto Melilla como Ceuta tienen una densidad de población muy elevada, por sus características especiales, por lo que las eliminamos de la muestra
+```{r}
+df <- dfprovincias[!grepl("CEUTA|MELILLA", dfprovincias$Provincia),]
+dfreducido <- dfprovincias[which(dfprovincias$DENSIDAD < 100),]
+
+#hist(df$DENSIDAD)
+#hist(dfreducido$DENSIDAD)
+hist(dfreducido$DENSIDAD,
+main="Densidad en provincias (excepto Ceuta y Melilla)",
+xlab="Densidad (Población/Superficie)",
+xlim=c(0,100),
+col="lightyellow",
+freq=TRUE
+)
+```
+
+## Creamos el mapa de densidad de población por provincia
+Para ello, necesitamos un Codigo que relacione el fichero SHAPEFILE con los datos del dataframe
+El Codigo de los ficheros SHAPEFILE es un string de 2 caracteres que en el caso del DATASET corresponde al COD_PROV
+Por lo tanto creamos un DATAFRAME con los datos que necesitamos
+```{r}
+mapa_densidad_provincias_peninsula<-merge(i_data_gs_provincias_peninsula, dfprovincias, by = "Codigo", all.x=TRUE)
+mapa_densidad_provincias_islas<-merge(i_data_gs_provincias_islas, dfprovincias, by = "Codigo", all.x=TRUE)
+
+mapa_provincias_peninsula <- 
+  tm_shape(mapa_densidad_provincias_peninsula) +
+  tm_fill("DENSIDAD", title = "Densidad", style = "fixed",
+        breaks = c(0, 20, 40, 60, 80, 100, Inf),
+        colorNA = "green")  +  # <-------- color for NA values +
+  #tm_polygons("DENSIDAD", textNA=">100", title="Densidad") +
+  tm_borders() +
+  #tm_text("Texto", size=0.5) +
+  tm_layout(legend.position = c("RIGHT","BOTTOM"),
+            legend.frame = FALSE)
+print(mapa_provincias_peninsula)
+
+mapa_densidad_provincias_islas <- 
+  tm_shape(mapa_densidad_provincias_islas) +
+  tm_fill("DENSIDAD", title = "Densidad", style = "fixed",
+        breaks = c(0, 20, 40, 60, 80, 100, Inf),
+        colorNA = "green")  +  # <-------- color for NA values +
+  tm_layout(legend.show = FALSE)
+print(mapa_densidad_provincias_islas)
+
+
+```
+## El resultado es que hay 6 provincias en España con una densidad de población inferior a 20 habitantes / km2
+* SORIA (8)
+* TERUEL (9)
+* CUENCA (11)
+* HUESCA (14)
+* ZAMORA (16)
+* AVILA (19)
+
+```{r}
+
+```
+## DENSIDAD DE POBLACIÓN POR MUNICIPIOS
+
+Creamos el mapa de densidad de población
+Para ello, necesitamos un CODIGOINE que relacione el fichero SHAPEFILE con los datos del dataframe
+El CODIGOINE de los ficheros SHAPEFILE es un string de 5 caracteres que en el caso del DATASET corresponde a los 5 primeros caracteres del COD_INE
+Por lo tanto creamos un DATAFRAME con los datos que necesitamos
+
+```{r}
+myvars <- c("COD_INE", "COD_PROV", "PROVINCIA", "NOMBRE_ACTUAL", "SUPERFICIE", "HABITANTES")
+dfmunicipios<-data[myvars]
+#Dividimos la superficie por 100, para pasarla de Hectáreas a Km2
+dfmunicipios <- transform(dfmunicipios, DENSIDAD = HABITANTES / (SUPERFICIE / 100))
+dfmunicipios <- transform(dfmunicipios, CODIGOINE = substr(dfmunicipios$COD_INE, 1, 5))
+
+#options(max.print=10000)
+#duplicated(p$CODIGOINE)
+
+#Eliminamos también los registros con datos de densidad muy elevados
+dfreducido <- dfmunicipios[which(dfmunicipios$DENSIDAD <= 200),]
+
+hist(dfreducido$DENSIDAD,
+main="Densidad en municipios",
+xlab="Densidad (Población/Superficie)",
+xlim=c(0,200),
+col="lightyellow",
+freq=TRUE
+)
+View(dfmunicipios)
+```
+## Creamos el mapa de densidad de población por municipio
+```{r}
+
+mapa_densidad_municipios_peninsula<-merge(i_data_gs_municipios, dfmunicipios, by = "CODIGOINE", all.x=TRUE)
+# Asignamos 99 a los municipios de los que no disponemos dato de densidad
+mapa_densidad_municipios_peninsula@data$DENSIDAD[which(is.na(mapa_densidad_municipios_peninsula@data$DENSIDAD))] <-99
+# Mapa de los municipios de las Islas Canarias
+mapa_densidad_municipios_islas<-merge(i_data_gs_municipios_islas, dfmunicipios, by = "CODIGOINE", all.x=TRUE)
+
+
+mapa_densidad_municipios_peninsula <- 
+  tm_shape(mapa_densidad_municipios_peninsula) +
+  tm_fill("DENSIDAD", title = "DENSIDAD DE POBLACIÓN (Habitantes/Km2)", style = "fixed",
+        breaks = c(0, 8, 12.5, Inf),
+        colorNA = "green")  +  # <-------- color for NA values +
+  tm_layout(legend.position = c("RIGHT","BOTTOM"),
+            legend.frame = FALSE)
+print(mapa_densidad_municipios_peninsula)
+
+
+mapa_densidad_municipios_islas <- 
+  tm_shape(mapa_densidad_municipios_islas) +
+  tm_fill("DENSIDAD", title = "DENSIDAD DE POBLACIÓN (Habitantes/Km2)", style = "fixed",
+        breaks = c(0, 8, 12.5, Inf),
+        colorNA = "green")  +  # <-------- color for NA values +
+  tm_layout(legend.show = FALSE)
+print(mapa_densidad_municipios_islas)
+
+```
+## Localizamos las provincias con más municipios despoblados
+```{r}
+df2 <- dfmunicipios[which(dfmunicipios$DENSIDAD <= 8),]
+dfresultado <-aggregate(list(df2$DENSIDAD), by=list(Provincia = df2$PROVINCIA, Codigo = df2$COD_PROV), FUN= length)
+View(dfresultado)
+```
+
